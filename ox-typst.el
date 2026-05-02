@@ -138,8 +138,20 @@ major-mode."
   :group 'org-export-typst)
 
 (defcustom org-typst-heading-numbering "1."
-  "Default numbering for headline used for the generated document."
-  :type 'string
+  "Default numbering for headline used for the generated document.
+
+This can be one of the following:
+  - A string: A Typst numbering pattern (e.g., \"1.\", \"1.1\", or \"(I)\").
+  - The symbol `none': Explicitly disables numbering in the Typst output.
+  - nil: No numbering command is inserted by the exporter at all,
+    allowing you to manage numbering via a custom Typst template.
+
+This setting maps to the \"#set heading(numbering: ...)\" command in Typst,
+<https://typst.app/docs/reference/model/numbering/>."
+  :type '(choice
+          (string :tag "Typst Numbering Pattern" :value "1.")
+          (const :tag "Explicitly Disable Numbering (none)" none)
+          (const :tag "No Default (Inherit from Template)" nil))
   :group 'org-export-typst)
 
 (defcustom org-typst-inline-image-rules
@@ -638,9 +650,14 @@ Unordered lists are handled according to
   (org-typst--label contents target info))
 
 (defun org-typst-template (contents info)
-  (let ((title (plist-get info :title))
+  "Return complete document string after Typst conversion.
+CONTENTS is the transcoded contents string.  INFO is a plist holding
+export options.  Handles the global document structure including
+`#set document' rules for title, author, and date, language settings,
+heading numbering, and the table of contents."
+  (let ((title (car-safe (plist-get info :title)))
         (author (when (plist-get info :with-author)
-                  (plist-get info :author)))
+                  (car-safe (plist-get info :author))))
         (language (plist-get info :language))
         (email (when (plist-get info :with-email)
                  (plist-get info :email)))
@@ -651,21 +668,30 @@ Unordered lists are handled according to
      (format "#let _ = ```typ
 exec %s
 ⁠```\n" (org-typst--generate-command (plist-get info :input-file) t))
-     (when (or (car title) author)
+     (when (or title author)
        (concat
         "#set document("
-        (format "title: \"%s\"" (or (car title) ""))
-        (when date (format ", date: %s" (string-trim-right (string-trim-left (org-typst-timestamp (car date) contents info) "#") ".display()")))
+        (format "title: %s" (org-typst--string-literal title))
+        (when date
+          (let ((ts (org-typst-timestamp (car date) contents info)))
+            (format ", date: %s"
+                    (string-trim-right (string-trim-left ts "#") ".display()"))))
         (when author
-          (or (when email
-                (format ", author: \"<%s> %s\"" (car author) email))
-              (format ", author: \"%s\"" (car author))))
+          (format ", author: %s"
+                  (org-typst--string-literal
+                   (if email
+                       (format "%s <%s>" author email)
+                     author))))
         ")\n"))
      (when language (format "#set text(lang: \"%s\")\n" language))
+     (when org-typst-heading-numbering
+       (format "#set heading(numbering: %s)\n"
+               (org-typst--as-string org-typst-heading-numbering)))
      (when typst-header (format "%s\n" typst-header))
-     (when toc "#outline()\n")
-     (format "#set heading(numbering: %s)\n"
-             (org-typst--as-string org-typst-heading-numbering))
+     (when toc
+       (if (wholenump toc)
+           (format "#outline(depth: %d)\n" toc)
+         "#outline()\n"))
      contents)))
 
 (defun org-typst-timestamp (timestamp _contents _info)
@@ -1015,6 +1041,13 @@ the Typst value for `none' is returned."
                     escaped
                   (org-trim escaped))
                 "\"")))))
+
+(defun org-typst--string-literal (s)
+  "Wrap STRING in a Typst string literal, escaping \\ and \"."
+  (when string
+    (let* ((string (string-replace "\\" "\\\\" string))
+           (string (string-replace "\"" "\\\"" string)))
+      (concat "\"" string "\""))))
 
 (defun org-typst--language (language)
   "Map Org LANGUAGE to Typst language for source blocks.
