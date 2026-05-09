@@ -1042,7 +1042,7 @@ the Typst value for `none' is returned."
                   (org-trim escaped))
                 "\"")))))
 
-(defun org-typst--string-literal (s)
+(defun org-typst--string-literal (string)
   "Wrap STRING in a Typst string literal, escaping \\ and \"."
   (when string
     (let* ((string (string-replace "\\" "\\\\" string))
